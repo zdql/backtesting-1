@@ -74,7 +74,7 @@ class Strat:
                 self.price_data.iloc[-1] - self.price_data.iloc[-lookback]) / self.price_data.iloc[-lookback]
             indices = np.argsort(returns)
 
-            num_indices = indices[:len(num_assets)]
+            num_indices = indices[:num_assets]
             return_weights = []
             for i in range(self.num_elems):
                 if i in num_indices:
@@ -138,7 +138,7 @@ class Strat:
                 self.calculate_matrices()
                 return self.efficient_frontier_weights()
 
-            elif strat == 'rolling':
+            elif strat == 'rolling' and len(self.price_data) > max(lookback, num):
                 return self.rolling_view(lookback, num)
             else:
                 return self.get_default_weights()
@@ -153,7 +153,7 @@ def strat_function(preds, prices, last_weights):
 
     strat = Strat(price_data, prices, outstanding_shares)
     # opt = strat.update_weights(strat='topxopt', num=4)
-    opt = strat.update_weights(strat='rolling', num=5, lookback=10)
+    opt = strat.update_weights(strat='rolling', num=4, lookback=10)
     for i in range(40):
         average_portfolio_allocations[i].append(opt[i])
     return opt
