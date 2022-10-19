@@ -11,6 +11,10 @@ import matplotlib.pyplot as plt
 
 import numpy as np
 from scipy import optimize
+import pandas as pd
+from pypfopt.efficient_frontier import EfficientFrontier
+from pypfopt import risk_models
+from pypfopt import expected_returns
 
 '''
 strat_function(preds, prices) - user specified mapping from past n days of price and analyst data to weights.
@@ -23,6 +27,8 @@ Your strategy function needs to work with this data to geenrate portfolio weight
 
 
 '''
+
+average_portfolio_allocations = {i: [] for i in range(40)}
 
 
 class Strat:
@@ -57,6 +63,28 @@ class Strat:
 
         return opt
 
+    def efficient_frontier_weights(self):
+
+        ef = EfficientFrontier(self.ind_er, self.cov_matrix)
+        return list(ef.max_sharpe().values())
+
+    def rolling_view(self, lookback, num_assets):
+        if len(self.price_data > lookback):
+            returns = (
+                self.price_data.iloc[-1] - self.price_data.iloc[-lookback]) / self.price_data.iloc[-lookback]
+            indices = np.argsort(returns)
+
+            num_indices = indices[:len(num_assets)]
+            return_weights = []
+            for i in range(self.num_elems):
+                if i in num_indices:
+                    return_weights.append(1/num_assets)
+                else:
+                    return_weights.append(0)
+            return return_weights
+        else:
+            return self.get_default_weights()
+
     def __init__(self, price_data, analyst_data, outstanding_shares):
         self.num_elems = len(outstanding_shares)
         self.weights = {i: 0 for i in range(self.num_elems)}
@@ -79,12 +107,41 @@ class Strat:
     def get_default_weights(self):
         return list(self.weights.values())
 
-    def update_weights(self):
-        if len(self.price_data) > 1:
-            self.calculate_matrices()
-            self.opt = self.MaximizeSharpeRatioOptmzn(
-                self.ind_er.to_numpy(), self.cov_matrix.to_numpy(), 0.0, 40)
-            return self.opt.x
+    def update_weights(self, strat='opt', num=1, lookback=1):
+        if len(self.price_data) > 2:
+            if strat == 'opt':
+                self.calculate_matrices()
+                self.opt = self.MaximizeSharpeRatioOptmzn(
+                    self.ind_er.to_numpy(), self.cov_matrix.to_numpy(), 0.0, 40)
+                return self.opt.x
+
+            elif strat == 'topxopt':
+                self.calculate_matrices()
+                self.opt = self.MaximizeSharpeRatioOptmzn(
+                    self.ind_er.to_numpy(), self.cov_matrix.to_numpy(), 0.0, 40)
+
+                weights = self.opt.x
+                ind = np.argpartition(weights, -num)[-num:]
+                new_weights = []
+                for i in range(self.num_elems):
+                    if i in ind:
+                        new_weights.append(weights[i])
+                    else:
+                        new_weights.append(0)
+
+                normalized_weights = new_weights / np.linalg.norm(new_weights)
+
+                return normalized_weights
+
+            elif strat == 'ef':
+                print(len(self.price_data))
+                self.calculate_matrices()
+                return self.efficient_frontier_weights()
+
+            elif strat == 'rolling':
+                return self.rolling_view(lookback, num)
+            else:
+                return self.get_default_weights()
         else:
             return self.get_default_weights()
 
@@ -95,7 +152,10 @@ def strat_function(preds, prices, last_weights):
     price_data = preds[1:]
 
     strat = Strat(price_data, prices, outstanding_shares)
-    opt = strat.update_weights()
+    # opt = strat.update_weights(strat='topxopt', num=4)
+    opt = strat.update_weights(strat='rolling', num=5, lookback=10)
+    for i in range(40):
+        average_portfolio_allocations[i].append(opt[i])
     return opt
 
 
@@ -104,3 +164,7 @@ Running the backtest - starting portfolio value of 10000, reading in data from t
 '''
 backtest(strat_function, 10000, '../test_datasets/price_data.csv',
          '../test_datasets/price_data.csv', True, "log.csv")
+
+print("portfolio allocations: ")
+for i in range(40):
+    print(np.mean(average_portfolio_allocations[i]))
