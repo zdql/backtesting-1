@@ -91,18 +91,31 @@ class Strat:
         self.price_data = pd.DataFrame(price_data)
         self.analyst_data = pd.DataFrame(analyst_data)
         self.outstanding_shares = outstanding_shares
+        self.VARBIAS = [1, 21, 29, 12, 24, 34, 18, 26, 8, 22, 0, 6, 28, 36, 13, 16, 7, 32,
+                        39, 27, 38, 35, 14, 31, 3, 19, 10, 2, 30, 9, 33, 11, 25, 17, 5, 20, 23, 37, 4, 15]
 
-    def calculate_matrices(self):
-        df = self.price_data
+    def calculate_matrices(self, view=None):
+        if view:
+            df = self.price_data.iloc[:-view]
 
-        self.cov_matrix = df.pct_change().apply(lambda x: np.log(1+x)).cov()
+            self.cov_matrix = df.pct_change().apply(lambda x: np.log(1+x)).cov()
 
-        self.corr_matrix = df.pct_change().apply(lambda x: np.log(1+x)).corr()
+            self.corr_matrix = df.pct_change().apply(lambda x: np.log(1+x)).corr()
 
-        self.ind_er = df.pct_change().mean()
+            self.ind_er = df.pct_change().mean()
 
-        self.ann_sd = df.pct_change().apply(lambda x: np.log(
-            1+x)).std().apply(lambda x: x*np.sqrt(250))
+            self.ann_sd = df.pct_change().apply(lambda x: np.log(
+                1+x)).std().apply(lambda x: x*np.sqrt(250))
+        else:
+            df = self.price_data
+            self.cov_matrix = df.pct_change().apply(lambda x: np.log(1+x)).cov()
+
+            self.corr_matrix = df.pct_change().apply(lambda x: np.log(1+x)).corr()
+
+            self.ind_er = df.pct_change().mean()
+
+            self.ann_sd = df.pct_change().apply(lambda x: np.log(
+                1+x)).std().apply(lambda x: x*np.sqrt(250))
 
     def get_default_weights(self):
         return list(self.weights.values())
@@ -133,6 +146,43 @@ class Strat:
 
                 return normalized_weights
 
+            elif strat == 'topadjxopt':
+                self.calculate_matrices()
+                self.opt = self.MaximizeSharpeRatioOptmzn(
+                    self.ind_er.to_numpy(), self.cov_matrix.to_numpy(), 0, 40)
+
+                weights = self.opt.x
+                ind = np.argpartition(weights, -num)[-num:]
+                vars = self.VARBIAS[:num]
+                new_weights = []
+                for i in range(self.num_elems):
+                    if i in ind and vars:
+                        new_weights.append(weights[i])
+                    else:
+                        new_weights.append(0)
+
+                normalized_weights = new_weights / np.linalg.norm(new_weights)
+
+                return normalized_weights
+
+            elif strat == 'viewopt' and len(self.price_data) > num:
+                self.calculate_matrices(view=num)
+                self.opt = self.MaximizeSharpeRatioOptmzn(
+                    self.ind_er.to_numpy(), self.cov_matrix.to_numpy(), 0.0, 40)
+
+                weights = self.opt.x
+                ind = np.argpartition(weights, -num)[-num:]
+                new_weights = []
+                for i in range(self.num_elems):
+                    if i in ind:
+                        new_weights.append(weights[i])
+                    else:
+                        new_weights.append(0)
+
+                normalized_weights = new_weights / np.linalg.norm(new_weights)
+
+                return normalized_weights
+
             elif strat == 'ef':
                 print(len(self.price_data))
                 self.calculate_matrices()
@@ -140,8 +190,22 @@ class Strat:
 
             elif strat == 'rolling' and len(self.price_data) > max(lookback, num):
                 return self.rolling_view(lookback, num)
+
+            elif strat == 'varbias':
+                new_weights = []
+                for i in range(self.num_elems):
+                    if i in self.VARBIAS[:num]:
+                        new_weights.append(1/len(self.VARBIAS))
+                    else:
+                        new_weights.append(0)
+
+                normalized_weights = new_weights / np.linalg.norm(new_weights)
+
+                return normalized_weights
+
             else:
                 return self.get_default_weights()
+
         else:
             return self.get_default_weights()
 
@@ -152,10 +216,17 @@ def strat_function(preds, prices, last_weights):
     price_data = preds[1:]
 
     strat = Strat(price_data, prices, outstanding_shares)
-    # opt = strat.update_weights(strat='topxopt', num=4)
-    opt = strat.update_weights(strat='rolling', num=4, lookback=10)
+    opt = strat.update_weights(strat='topxopt', num=4)
+
+    # opt = strat.update_weights(strat='ef', num=4)
+    # opt = strat.update_weights(strat='rolling', num=4, lookback=10)
+    # opt = strat.update_weights(strat='viewopt', num=30)
+    # opt = strat.update_weights(strat='varbias', num=1)
+    # opt = strat.update_weights(strat='topadjxopt', num=4)
+
     for i in range(40):
         average_portfolio_allocations[i].append(opt[i])
+
     return opt
 
 
